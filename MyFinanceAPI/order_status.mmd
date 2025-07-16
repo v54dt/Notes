@@ -1,0 +1,30 @@
+stateDiagram-v2
+    [*] --> Start
+    Start --> PendingSubmit: Send Order
+    
+    PendingSubmit --> PreSubmitted: Get Order Status Response<br/>Success
+    PendingSubmit --> Submitted: Get Order Status Response<br/>Success
+    PendingSubmit --> Failed: Get Order Status Response<br/>Failed (Reject by Front-end)
+    
+    PreSubmitted --> Submitted: Order Response
+    
+    Submitted --> Failed: Get New Order Error<br/>(Reject by Middle-end)
+    Submitted --> PendingModify: Send Order Modify
+    Submitted --> PendingCancel: Send Order Cancel
+    Submitted --> PartialFilled: Order Executed
+    Submitted --> Filled: Order Executed
+
+    PendingModify --> Submitted: Order Response<br/>Success (Modified)
+    PendingModify --> Submitted: Modify Failed
+
+    PendingCancel --> End: Cancel Success
+
+    PartialFilled --> Filled: Order Executed
+    PartialFilled --> PendingCancel: Send Order Cancel
+    PartialFilled --> PendingModify: Send Order Modify
+
+    Filled --> End
+
+    Failed --> End
+
+    End --> [*]
