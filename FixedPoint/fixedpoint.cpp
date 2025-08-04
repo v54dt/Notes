@@ -5,6 +5,7 @@
 #include "fixedpoint.h"
 
 #include <algorithm>
+#include <cmath>
 #include <cstring>
 #include <stdexcept>
 
@@ -62,244 +63,100 @@ inline FixedPoint from_fpm(const fpm_type& value, unsigned int precision) {
 // Normalize two FixedPoint values to have the same precision (optimized)
 inline std::pair<FixedPoint, FixedPoint> normalize_precision(
     const FixedPoint& a, const FixedPoint& b) {
-  if (a.precision == b.precision) {
-    return {a, b};
-  }
+  if (a.precision == b.precision) return {a, b};
 
-  unsigned int max_precision = std::max(a.precision, b.precision);
-  FixedPoint normalized_a = a;
-  FixedPoint normalized_b = b;
-
-  if (a.precision < max_precision) {
-    unsigned int diff = max_precision - a.precision;
-    int64_t scale = fast_pow10(diff);
-    normalized_a = FixedPoint(a.value * scale, max_precision);
-  }
-
-  if (b.precision < max_precision) {
-    unsigned int diff = max_precision - b.precision;
-    int64_t scale = fast_pow10(diff);
-    normalized_b = FixedPoint(b.value * scale, max_precision);
-  }
-
-  return {normalized_a, normalized_b};
-}
-
-// Fast integer to string conversion
-inline void int_to_string(int value, char* buffer, int& length) {
-  if (value == 0) {
-    buffer[0] = '0';
-    length = 1;
-    return;
-  }
-
-  bool negative = value < 0;
-  if (negative) value = -value;
-
-  length = 0;
-  while (value > 0) {
-    buffer[length++] = '0' + (value % 10);
-    value /= 10;
-  }
-
-  if (negative) {
-    buffer[length++] = '-';
-  }
-
-  // Reverse the string
-  for (int i = 0; i < length / 2; ++i) {
-    std::swap(buffer[i], buffer[length - 1 - i]);
+  if (a.precision < b.precision) {
+    int64_t scale = fast_pow10(b.precision - a.precision);
+    return {FixedPoint(a.value * scale, b.precision), b};
+  } else {
+    int64_t scale = fast_pow10(a.precision - b.precision);
+    return {a, FixedPoint(b.value * scale, a.precision)};
   }
 }
+
+
 }  // namespace internal
 
 // Convert FixedPoint to string (optimized version)
 std::string to_string(const FixedPoint& fp) {
   if (fp.precision == 0) {
-    return std::to_string(fp.value);
+    char buffer[16];
+    int len = sprintf(buffer, "%d", fp.value);
+    return std::string(buffer, len);
   }
 
-  // Pre-allocate buffer for efficiency
-  char buffer[32];  // Enough for int32 + decimal point + sign
-  int length = 0;
-
-  bool negative = fp.value < 0;
-  int abs_value = negative ? -fp.value : fp.value;
-
-  // Convert to string manually for performance
-  if (abs_value == 0) {
-    buffer[length++] = '0';
-  } else {
-    // Extract digits
-    char digits[20];
-    int digit_count = 0;
-    int temp = abs_value;
-    while (temp > 0) {
-      digits[digit_count++] = '0' + (temp % 10);
-      temp /= 10;
-    }
-
-    // Add leading zeros if necessary
-    while (digit_count <= static_cast<int>(fp.precision)) {
-      digits[digit_count++] = '0';
-    }
-
-    // Build result string
-    if (negative) {
-      buffer[length++] = '-';
-    }
-
-    // Add digits before decimal point
-    int decimal_pos = digit_count - fp.precision;
-    for (int i = digit_count - 1; i >= decimal_pos; --i) {
-      buffer[length++] = digits[i];
-    }
-
-    // Add decimal point and remaining digits
-    if (fp.precision > 0) {
-      buffer[length++] = '.';
-      for (int i = decimal_pos - 1; i >= 0; --i) {
-        buffer[length++] = digits[i];
-      }
-    }
-  }
-
-  return std::string(buffer, length);
+  char buffer[32];
+  int divisor = internal::fast_pow10(fp.precision);
+  int integer_part = fp.value / divisor;
+  int fractional_part = fp.value % divisor;
+  
+  if (fractional_part < 0) fractional_part = -fractional_part;
+  
+  int len = sprintf(buffer, "%d.%0*d", integer_part, fp.precision, fractional_part);
+  return std::string(buffer, len);
 }
 
 // Convert FixedPoint to string with specified precision
 std::string to_string_formatted(const FixedPoint& fp, int precision) {
-  double value = to_double(fp);
-
 #if HAS_STD_FORMAT
-  // C++20: Use std::format (much faster than stringstream)
-  return std::format("{:.{}f}", value, precision);
+  return std::format("{:.{}f}", to_double(fp), precision);
 #else
-  // Pre-C++20: More efficient than original stringstream approach
   char buffer[64];
-  int result = snprintf(buffer, sizeof(buffer), "%.*f", precision, value);
-  if (result > 0 && result < static_cast<int>(sizeof(buffer))) {
-    return std::string(buffer, result);
-  }
-
-  // Fallback to stringstream for edge cases
-  std::stringstream ss;
-  ss << std::fixed << std::setprecision(precision) << value;
-  return ss.str();
+  int len = snprintf(buffer, sizeof(buffer), "%.*f", precision, to_double(fp));
+  return std::string(buffer, len);
 #endif
 }
 
 // Convert FixedPoint to double (optimized)
 double to_double(const FixedPoint& fp) {
-  if (fp.precision == 0) {
-    return static_cast<double>(fp.value);
-  }
-
+  if (fp.precision == 0) return static_cast<double>(fp.value);
+  
   int64_t divisor = internal::fast_pow10(fp.precision);
-  if (divisor != 0) {
-    return static_cast<double>(fp.value) / divisor;
-  }
-
-  // Fallback for large precision
-  double result = fp.value;
-  for (unsigned int i = 0; i < fp.precision; ++i) {
-    result /= 10.0;
-  }
-  return result;
+  return divisor ? static_cast<double>(fp.value) / divisor : fp.value / std::pow(10.0, fp.precision);
 }
 
 // Convert FixedPoint to int (optimized)
 int to_int(const FixedPoint& fp) {
-  if (fp.precision == 0) {
-    return fp.value;
-  }
-
+  if (fp.precision == 0) return fp.value;
+  
   int64_t divisor = internal::fast_pow10(fp.precision);
-  if (divisor != 0) {
-    return fp.value / divisor;
-  }
-
-  // Fallback for large precision
-  int result = fp.value;
-  for (unsigned int i = 0; i < fp.precision; ++i) {
-    result /= 10;
-  }
-  return result;
+  return divisor ? fp.value / divisor : fp.value / static_cast<int>(std::pow(10, fp.precision));
 }
 
 // Create FixedPoint from double (optimized)
 FixedPoint from_double(double value, unsigned int precision) {
-  if (precision > MAX_PRECISION) {
-    precision = MAX_PRECISION;  // Prevent overflow
-  }
-
+  precision = std::min(precision, static_cast<unsigned int>(MAX_PRECISION));
+  
   int64_t multiplier = internal::fast_pow10(precision);
-  if (multiplier != 0) {
-    int int_value =
-        static_cast<int>(value * multiplier + (value >= 0 ? 0.5 : -0.5));
-    return FixedPoint(int_value, precision);
-  }
-
-  // Fallback
-  for (unsigned int i = 0; i < precision; ++i) {
-    value *= 10.0;
-  }
-  return FixedPoint(static_cast<int>(value + (value >= 0 ? 0.5 : -0.5)),
-                    precision);
+  double scaled = multiplier ? value * multiplier : value * std::pow(10.0, precision);
+  
+  return FixedPoint(static_cast<int>(scaled + (scaled >= 0 ? 0.5 : -0.5)), precision);
 }
 
 // Create FixedPoint from string (optimized)
 FixedPoint from_string(const std::string& str) {
   const char* p = str.c_str();
-  bool negative = false;
-
-  // Skip whitespace
-  while (*p == ' ' || *p == '\t') ++p;
-
-  // Check sign
-  if (*p == '-') {
-    negative = true;
-    ++p;
-  } else if (*p == '+') {
-    ++p;
-  }
-
-  // Parse integer part
+  bool negative = (*p == '-');
+  if (negative || *p == '+') ++p;
+  
   int integer_part = 0;
   while (*p >= '0' && *p <= '9') {
-    integer_part = integer_part * 10 + (*p - '0');
-    ++p;
+    integer_part = integer_part * 10 + (*p++ - '0');
   }
-
-  // Check for decimal point
+  
   if (*p != '.') {
     return FixedPoint(negative ? -integer_part : integer_part, 0);
   }
-
-  ++p;  // Skip decimal point
-
-  // Parse fractional part
+  
+  ++p; // Skip '.'
   int fractional_part = 0;
   unsigned int precision = 0;
   while (*p >= '0' && *p <= '9') {
-    fractional_part = fractional_part * 10 + (*p - '0');
+    fractional_part = fractional_part * 10 + (*p++ - '0');
     ++precision;
-    ++p;
   }
-
-  // Combine parts
-  int64_t total = integer_part;
-  int64_t multiplier = internal::fast_pow10(precision);
-  if (multiplier != 0) {
-    total = total * multiplier + fractional_part;
-  } else {
-    // Handle large precision
-    for (unsigned int i = 0; i < precision; ++i) {
-      total *= 10;
-    }
-    total += fractional_part;
-  }
-
+  
+  int64_t total = static_cast<int64_t>(integer_part) * internal::fast_pow10(precision) + fractional_part;
   return FixedPoint(negative ? -total : total, precision);
 }
 
@@ -325,87 +182,53 @@ FixedPoint subtract(const FixedPoint& a, const FixedPoint& b) {
 }
 
 FixedPoint multiply(const FixedPoint& a, const FixedPoint& b) {
-  // Use int64_t to prevent overflow during multiplication
   int64_t result = static_cast<int64_t>(a.value) * b.value;
-  unsigned int result_precision = a.precision + b.precision;
+  unsigned int precision = a.precision + b.precision;
 
-  // Reduce precision if necessary to fit in int32
-  while (result_precision > MAX_PRECISION || result > INT32_MAX ||
-         result < INT32_MIN) {
+  while (precision > MAX_PRECISION || result > INT32_MAX || result < INT32_MIN) {
     result /= 10;
-    result_precision--;
+    precision--;
   }
 
-  return FixedPoint(static_cast<int>(result), result_precision);
+  return FixedPoint(static_cast<int>(result), precision);
 }
 
 FixedPoint divide(const FixedPoint& a, const FixedPoint& b) {
-  if (b.value == 0) {
-    throw std::domain_error("Division by zero");
-  }
+  if (b.value == 0) throw std::domain_error("Division by zero");
 
-  // Scale up numerator for better precision
-  int64_t scaled_a = static_cast<int64_t>(a.value);
-  unsigned int extra_precision = DEFAULT_FRACTIONAL_DIGITS;
-
-  // Scale up as much as possible without overflow
-  while (extra_precision > 0 && scaled_a <= INT64_MAX / 10 &&
-         scaled_a >= INT64_MIN / 10) {
-    scaled_a *= 10;
-    extra_precision--;
-  }
-
+  int64_t scaled_a = static_cast<int64_t>(a.value) * internal::fast_pow10(DEFAULT_FRACTIONAL_DIGITS);
   int64_t result = scaled_a / b.value;
-  unsigned int result_precision =
-      a.precision + (DEFAULT_FRACTIONAL_DIGITS - extra_precision) - b.precision;
+  unsigned int precision = a.precision + DEFAULT_FRACTIONAL_DIGITS - b.precision;
 
-  // Reduce precision if necessary
-  while (result > INT32_MAX || result < INT32_MIN ||
-         result_precision > MAX_PRECISION) {
+  while (result > INT32_MAX || result < INT32_MIN || precision > MAX_PRECISION) {
     result /= 10;
-    result_precision--;
+    precision--;
   }
 
-  return FixedPoint(static_cast<int>(result), result_precision);
+  return FixedPoint(static_cast<int>(result), precision);
 }
 
 // Comparison operations (optimized)
 bool equals(const FixedPoint& a, const FixedPoint& b) {
-  if (a.precision == b.precision) {
-    return a.value == b.value;
-  }
-
-  // Different precision - normalize only if necessary
+  if (a.precision == b.precision) return a.value == b.value;
   if (a.value == 0 && b.value == 0) return true;
-
+  
   auto [norm_a, norm_b] = internal::normalize_precision(a, b);
   return norm_a.value == norm_b.value;
 }
 
 bool less_than(const FixedPoint& a, const FixedPoint& b) {
-  if (a.precision == b.precision) {
-    return a.value < b.value;
-  }
-
-  // Quick check for different signs
-  if ((a.value < 0) != (b.value < 0)) {
-    return a.value < 0;
-  }
-
+  if (a.precision == b.precision) return a.value < b.value;
+  if ((a.value < 0) != (b.value < 0)) return a.value < 0;
+  
   auto [norm_a, norm_b] = internal::normalize_precision(a, b);
   return norm_a.value < norm_b.value;
 }
 
 bool greater_than(const FixedPoint& a, const FixedPoint& b) {
-  if (a.precision == b.precision) {
-    return a.value > b.value;
-  }
-
-  // Quick check for different signs
-  if ((a.value < 0) != (b.value < 0)) {
-    return a.value > 0;
-  }
-
+  if (a.precision == b.precision) return a.value > b.value;
+  if ((a.value < 0) != (b.value < 0)) return a.value > 0;
+  
   auto [norm_a, norm_b] = internal::normalize_precision(a, b);
   return norm_a.value > norm_b.value;
 }
