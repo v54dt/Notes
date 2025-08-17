@@ -1,0 +1,21 @@
+services:
+  message-broker-client-apex:
+    image: message-broker:v1.0.0
+    ports:
+      - "19374:9374"
+
+  apex-netprobe:
+    image: quay.io/superq/smokeping-prober:latest
+    network_mode: "service:message-broker-client-apex"
+    cap_add:
+      - NET_RAW
+    environment:
+      - GOMAXPROCS=1
+    command:
+      - --config.file=/config/targets.yml
+      - --web.listen-address=:9374
+    volumes:
+      - ./targets.yml:/config/targets.yml:ro
+    restart: unless-stopped
+    depends_on:
+      - message-broker-client-apex

@@ -1,0 +1,44 @@
+groups:
+- name: smokeping-a2b
+  rules:
+  - record: job:smokeping_rtt_seconds:avg5m
+    expr: |
+      (sum by (job, path, host) (rate(smokeping_response_duration_seconds_sum[5m])))
+      /
+      (sum by (job, path, host) (rate(smokeping_response_duration_seconds_count[5m])))
+
+  - record: job:smokeping_rtt_seconds:p95_5m
+    expr: |
+      histogram_quantile(
+        0.95,
+        sum by (le, job, path, host) (rate(smokeping_response_duration_seconds_bucket[5m]))
+      )
+
+  - record: job:smokeping_loss_ratio:5m
+    expr: |
+      1 - (
+        sum by (job, path, host) (rate(smokeping_response_duration_seconds_count[5m]))
+        /
+        sum by (job, path, host) (rate(smokeping_requests_total[5m]))
+      )
+
+  - alert: PacketLossHigh
+    expr: job:smokeping_loss_ratio:5m > 0.05
+    for: 10m
+    labels:
+      severity: warning
+    annotations:
+      summary: "Forwarder Packetlost > 5% for 10 consecutive minutes"
+      description: "host={{$labels.host}} loss={{ printf \"%.2f%%\" ( * 100 .Value ) }}"
+
+
+  - alert: HighLatencyP95
+    expr: job:smokeping_rtt_seconds:p95_5m > 0.1
+    for: 10m
+    labels:
+      severity: warning
+    annotations:
+      summary: "Forwarder p95 RTT > 100ms for 10 consecutive minutes"
+      description: "host={{$labels.host}} p95={{ printf \"%.1f ms\" ( * 1000 .Value ) }}"
+  
+  
