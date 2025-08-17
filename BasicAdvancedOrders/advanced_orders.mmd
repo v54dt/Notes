@@ -1,0 +1,26 @@
+flowchart LR
+  C((Client))
+
+  subgraph OH["Order Hub"]
+    direction TB
+    OHR[Orders]
+    OHA[Attachments]
+  end
+
+  WOMS["Smart Order<br/>Middle Service"]
+
+  %% Backend cluster
+  subgraph BE["Backend"]
+    direction TB
+    BORDERS[Orders]
+  end
+
+ 
+  C -- "Orders" --> OH
+  C -- "Orders with Attachment" --> OH
+  C -- "Smart Orders" --> WOMS
+
+ 
+  OHA --> WOMS
+  OHR --> BORDERS
+  WOMS -- "Orders" --> BORDERS
