@@ -1,0 +1,13 @@
+services:
+  suricata:
+    image: jasonish/suricata:latest
+    container_name: suricata-multicast
+    network_mode: host
+    cap_add:
+      - NET_ADMIN
+      - SYS_NICE
+    volumes:
+      - ./logs:/var/log/suricata
+      - ./suricata.yaml:/etc/suricata/suricata.yaml
+    command: [ "-i", "wlo1", "-v" ]
+    restart: unless-stopped

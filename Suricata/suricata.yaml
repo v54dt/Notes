@@ -1,0 +1,117 @@
+%YAML 1.1
+---
+
+vars:
+  address-groups:
+    HOME_NET: "224.0.0.0/4"
+    EXTERNAL_NET: "!$HOME_NET"
+
+bpf-filter: |
+  ip multicast and (
+    (host 224.0.100.100 and port 10000) or 
+    (host 224.2.100.100 and port 10002) or 
+    (host 224.4.100.100 and port 10004) or 
+    (host 224.8.100.100 and port 10008)
+  )
+
+af-packet:
+  - interface: wlo1
+    cluster-id: 99
+    cluster-type: cluster_flow
+    defrag: yes
+    use-mmap: yes
+    tpacket-v3: yes
+    ring-size: 32768
+    buffer-size: 512mb
+    promisc: yes
+
+# Unix Socket for suricata_exporter
+unix-command:
+  version: 0.2
+  enabled: yes
+  filename: /var/run/suricata/suricata.socket
+  mode: 0666
+
+stats:
+  enabled: yes
+  interval: 1
+  decoder-events: true
+  stream-events: true
+
+outputs:
+  - pcap-log:
+      enabled: yes
+      filename: /var/log/suricata/multicast-%Y-%m-%d.pcap
+      compression: none
+      mode: normal
+      use-stream-depth: no
+      honor-pass-rules: no
+      threads: auto
+            
+  - eve-log:
+      enabled: no
+      filetype: regular
+      filename: /var/log/suricata/eve.json
+      rotate-interval: day
+      types:
+        - stats:
+            totals: yes
+            threads: yes
+            deltas: yes
+        - flow
+
+  - stats:
+      enabled: no
+      filename: /var/log/suricata/stats.log
+      append: yes
+      totals: yes
+      threads: yes
+
+flow:
+  memcap: 512mb
+  hash-size: 262144
+  prealloc: 100000
+  emergency-recovery: 20
+  timeouts:
+    default:
+      new: 60
+      established: 3600
+      closed: 10
+    udp:
+      new: 60
+      established: 3600
+
+app-layer:
+  protocols:
+    http:
+      enabled: no
+    ftp:
+      enabled: no
+    smtp:
+      enabled: no
+    tls:
+      enabled: no
+    dns:
+      enabled: no
+
+host-mode: sniffer-only
+
+threading:
+  set-cpu-affinity: no
+  detect-thread-ratio: 1.0
+
+logging:
+  default-log-level: info
+  outputs:
+    - console:
+        enabled: yes
+    - file:
+        enabled: yes
+        level: info
+        filename: /var/log/suricata/suricata.log
+
+runmode: auto
+
+default-rule-path: /etc/suricata/rules
+rule-files:
+  - suricata.rules
