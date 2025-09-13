@@ -1,0 +1,140 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Latency Dashboard</title>
+    <script src="https://unpkg.com/uplot@1.6.24/dist/uPlot.iife.min.js"></script>
+    <link rel="stylesheet" href="https://unpkg.com/uplot@1.6.24/dist/uPlot.min.css">
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            margin: 20px;
+            background-color: #f5f5f5;
+        }
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+            background: white;
+            padding: 20px;
+            border-radius: 8px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+        h1 {
+            color: #333;
+            text-align: center;
+            margin-bottom: 30px;
+        }
+        .chart-container {
+            margin: 20px 0;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>Order Latency Dashboard</h1>
+        <div class="chart-container">
+            <div id="chart"></div>
+        </div>
+    </div>
+
+    <script>
+        async function fetchData() {
+            const response = await fetch('/api/latency');
+            return await response.json();
+        }
+
+        function createChart(data) {
+            // Get today's date and set time range from 08:00 to 14:00 UTC+8
+            const today = new Date();
+            // Set to 08:00 UTC+8 (which is 00:00 UTC)
+            today.setUTCHours(0, 0, 0, 0);
+            const startTime = Math.floor(today.getTime() / 1000);
+            const endTime = startTime + (6 * 60 * 60); // 6 hours later (14:00 UTC+8)
+
+            // Group data by broker
+            const brokers = [...new Set(data.map(d => d.broker))];
+            const series = [
+                { label: "Time" }
+            ];
+
+            // Add series for each broker
+            brokers.forEach(broker => {
+                series.push({
+                    label: broker,
+                    stroke: getColorForBroker(broker),
+                    width: 2
+                });
+            });
+
+            // Prepare data for uPlot
+            const timestamps = [];
+            const brokerData = {};
+            brokers.forEach(broker => brokerData[broker] = []);
+
+            data.forEach(row => {
+                if (row.timestamp >= startTime && row.timestamp <= endTime) {
+                    if (!timestamps.includes(row.timestamp)) {
+                        timestamps.push(row.timestamp);
+                    }
+                }
+            });
+
+            timestamps.sort((a, b) => a - b);
+
+            // Fill data arrays
+            timestamps.forEach(ts => {
+                brokers.forEach(broker => {
+                    const point = data.find(d => d.timestamp === ts && d.broker === broker);
+                    brokerData[broker].push(point ? point.latency_ms : null);
+                });
+            });
+
+            const plotData = [timestamps, ...brokers.map(broker => brokerData[broker])];
+
+            const opts = {
+                title: "Order Latency (08:00 - 14:00 UTC+8)",
+                width: 1000,
+                height: 400,
+                series: series,
+                axes: [
+                    {
+                        label: "Time (UTC+8)",
+                        values: (u, vals) => vals.map(v => {
+                            const date = new Date(v * 1000);
+                            date.setHours(date.getUTCHours() + 8);
+                            return date.toISOString().substr(11, 8);
+                        })
+                    },
+                    {
+                        label: "Latency (ms)",
+                        side: 1
+                    }
+                ],
+                scales: {
+                    x: {
+                        min: startTime,
+                        max: endTime
+                    }
+                }
+            };
+
+            return new uPlot(opts, plotData, document.getElementById('chart'));
+        }
+
+        function getColorForBroker(broker) {
+            const colors = {
+                'BrokerA': '#ff6b6b',
+                'BrokerB': '#4ecdc4',
+                'BrokerC': '#45b7d1'
+            };
+            return colors[broker] || '#666';
+        }
+
+        // Initialize dashboard
+        fetchData().then(data => {
+            createChart(data);
+        });
+    </script>
+</body>
+</html>
