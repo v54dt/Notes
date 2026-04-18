@@ -62,20 +62,43 @@ function fetchJson_(url) {
     return null;
 }
 
-function extractMisPrice_(data) {
+function fetchMisQuote_(symbol, prefix) {
+    const data = fetchJson_("https://mis.twse.com.tw/stock/api/getStockInfo.jsp?ex_ch=" + prefix + "_" + symbol + ".tw");
     const arr = data && data.msgArray;
-    if (!arr || arr.length === 0) return "-";
-    return arr[0].z || "-";
+    if (!arr || arr.length === 0) return null;
+    const q = arr[0];
+    if (!q.z || q.z === "-") return null;
+    return q;
+}
+
+function resolveMisQuote_(symbol) {
+    return fetchMisQuote_(symbol, "tse") || fetchMisQuote_(symbol, "otc");
 }
 
 function getTWSEStock(symbol = "0050") {
-    const data = fetchJson_("https://mis.twse.com.tw/stock/api/getStockInfo.jsp?ex_ch=tse_" + symbol + ".tw");
-    return extractMisPrice_(data);
+    const q = fetchMisQuote_(symbol, "tse");
+    return (q && q.z) || "-";
 }
 
 function getTPEXStock(symbol = "00679B") {
-    const data = fetchJson_("https://mis.twse.com.tw/stock/api/getStockInfo.jsp?ex_ch=otc_" + symbol + ".tw");
-    return extractMisPrice_(data);
+    const q = fetchMisQuote_(symbol, "otc");
+    return (q && q.z) || "-";
+}
+
+function getStockChange(symbol = "2330") {
+    const q = resolveMisQuote_(symbol);
+    if (!q) return "";
+    const z = parseFloat(q.z), y = parseFloat(q.y);
+    if (isNaN(z) || isNaN(y)) return "";
+    return z - y;
+}
+
+function getStockChangePercent(symbol = "2330") {
+    const q = resolveMisQuote_(symbol);
+    if (!q) return "";
+    const z = parseFloat(q.z), y = parseFloat(q.y);
+    if (isNaN(z) || isNaN(y) || y === 0) return "";
+    return (z - y) / y;
 }
 
 function getOTCStock(symbol = "1260") {
@@ -93,9 +116,9 @@ function getOTCStock(symbol = "1260") {
 function getOTCStockCNYES(symbol = "1260") {
     const data = fetchJson_("https://ws.api.cnyes.com/ws/api/v1/charting/history?resolution=1&symbol=TWG:" + symbol + ":STOCK&quote=1");
     try {
-        return data.data.quote["6"] || "n.a";
+        return data.data.quote["6"] || "";
     } catch (e) {
-        return "n.a";
+        return "";
     }
 }
 
@@ -103,9 +126,9 @@ function getStockClose(symbol = "1260") {
     const sources = [getTWSEStock, getTPEXStock, getOTCStockCNYES];
     for (const fn of sources) {
         const price = fn(symbol);
-        if (price && price !== "-" && price !== "n.a") {
+        if (price && price !== "-") {
             return price;
         }
     }
-    return "n.a";
+    return "";
 }
