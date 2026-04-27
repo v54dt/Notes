@@ -1,18 +1,26 @@
-
-
+---
+config:
+  flowchart:
+    padding: 20
+    nodeSpacing: 50
+    rankSpacing: 60
+    subGraphTitleMargin:
+      top: 12
+      bottom: 24
+---
 flowchart TB
     %% ====== Upstream Data Source ======
-    Exchange["Exchange Feed<br/>TWSE / TAIFEX / TPEX / TFX"]
+    Exchange["Exchange Feed<br/>TWSE / TPEX / TAIFEX"]
 
     %% ====== Capture Layer ======
     subgraph CaptureLayer["Capture Layer (DC Internal)"]
-        Capture["Capture Process (C++)<br/>1. Receive exchange feed<br/>2. Normalize<br/>3. SBE encode once<br/>4. Dual-path write"]
+        Capture["Capture Process"]
     end
 
     %% ====== Path A: Internal Disaster Recovery ======
-    subgraph PathA["Path A: Internal Disaster Recovery (DC LAN, microsecond level)"]
+    subgraph PathA["Path A: Internal Disaster Recovery (DC LAN)"]
         direction TB
-        AeronPub["Aeron Publication<br/>(IPC + UDP)<br/>Apache 2.0, OSS"]
+        AeronPub["Aeron Publication<br/>(IPC + UDP)"]
         AeronStream["Aeron Stream<br/>SBE-encoded messages<br/>with sequence_number"]
         AeronArchive["Aeron Archive<br/>Persistent recording to disk<br/>Replay + merge with live"]
 
@@ -21,11 +29,11 @@ flowchart TB
     end
 
     %% ====== Path B: External Historical Query ======
-    subgraph PathB["Path B: External User Query (Internet, millisecond level)"]
+    subgraph PathB["Path B: External User Query (Internet)"]
         direction TB
-        AsyncQueue["Lock-free SPSC Queue<br/>(decouple from capture hot path)"]
-        QuestDBWriter["QuestDB Writer Thread<br/>Batch insert<br/>Alert on queue full (never block)"]
-        QuestDB[("QuestDB<br/>Time-partitioned<br/>Symbol + Timestamp indexed<br/>Auto-tier cold data to Parquet")]
+        AsyncQueue["Lock-free SPSC Queue"]
+        QuestDBWriter["QuestDB Writer Thread"]
+        QuestDB[("QuestDB<br/>Time-partitioned<br/>Symbol + Timestamp indexed")]
 
         AsyncQueue --> QuestDBWriter
         QuestDBWriter --> QuestDB
@@ -33,50 +41,36 @@ flowchart TB
 
     %% ====== Internal Consumer (Path A) ======
     subgraph InternalConsumer["Internal Consumer"]
-        MarketDataSub["Market Data Subscription System<br/>(Aeron Client)<br/>On intraday restart:<br/>1. Connect Archive with last_sequence<br/>2. Replay to live position<br/>3. Merge with live (seamless)"]
+        MarketDataSub["Market Data Subscription System Disaster Recovery<br/>(Aeron Client)"]
     end
 
     %% ====== External Access Layer (Path B) ======
     subgraph ExternalAccess["External Access Layer (DMZ)"]
-        QueryServer["Query Server (C++)<br/>1. gRPC server-streaming<br/>2. libpq single-row mode<br/>3. SBE encode chunks<br/>4. Auto backpressure (HTTP/2)<br/>5. JWT auth interceptor"]
-        TLSTerm["TLS Termination<br/>(nginx / envoy)<br/>Cert rotation"]
+        QueryServer["Historical Market Data Server"]
+        TLSTerm["TLS Termination<br/>(nginx / envoy)"]
     end
 
     subgraph SDKs["External SDKs (Internet)"]
         direction LR
         CppSDK["C++ SDK<br/>grpc++ + SBE codegen"]
-        JavaSDK["Java SDK<br/>grpc-java + SBE codegen"]
         PythonSDK["Python SDK<br/>grpcio + SBE codegen"]
-        GoSDK["Go SDK<br/>grpc-go + SBE codegen"]
-        CSharpSDK["C# SDK<br/>Grpc.Net + SBE codegen"]
     end
 
-    EndUser["External End User<br/>(Enterprise / Individual)"]
-
-    %% ====== Shared Schema ======
-    subgraph SchemaRepo["SBE Schema Repository (Single Source of Truth)"]
-        SBESchema["market_data.xml<br/>git tagged<br/>codegen targets:<br/>cpp/ java/ python/ go/ csharp/"]
-    end
+    EndUser["External End User"]
 
     %% ====== Connections ======
     Exchange --> Capture
-    Capture -- "SBE bytes (sync, microseconds)" --> AeronPub
+    Capture -- "SBE bytes (sync)" --> AeronPub
     Capture -- "Tick struct (async)" --> AsyncQueue
 
     AeronArchive -- "Replay request<br/>(by sequence/timestamp)" --> MarketDataSub
-    AeronStream -- "Live subscribe" --> MarketDataSub
+    %% AeronStream -- "Live subscribe" --> MarketDataSub
 
     QuestDB -- "SQL query<br/>(symbol + time range)" --> QueryServer
     QueryServer -- "gRPC + HTTP/2 + TLS<br/>protobuf wrapper + SBE bytes payload" --> TLSTerm
     TLSTerm -- "Internet (WAN)<br/>port 443" --> SDKs
 
     SDKs --> EndUser
-
-    %% Schema feeds all components
-    SBESchema -. "C++ codegen" .-> Capture
-    SBESchema -. "C++ codegen" .-> QueryServer
-    SBESchema -. "C++ codegen" .-> MarketDataSub
-    SBESchema -. "5 langs codegen" .-> SDKs
 
     %% ====== Styles ======
     classDef pathA fill:#e3f2fd,stroke:#1976d2,stroke-width:2px,color:#000
@@ -89,6 +83,5 @@ flowchart TB
     class AeronPub,AeronStream,AeronArchive,MarketDataSub pathA
     class AsyncQueue,QuestDBWriter,QueryServer,TLSTerm pathB
     class Capture capture
-    class CppSDK,JavaSDK,PythonSDK,GoSDK,CSharpSDK,EndUser external
+    class CppSDK,PythonSDK,EndUser external
     class QuestDB storage
-    class SBESchema schema
